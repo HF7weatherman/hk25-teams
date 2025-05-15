@@ -358,7 +358,10 @@ def _get_var_in_trigger_area_multiple(
     var_in_trigger_area = _init_var_in_trigger_area_multiple(
         mcs_trigger_locs, data_field, times_before_trigger
         )
-    
+    relative_time_to_trigger = _init_relative_time_to_trigger(
+        mcs_trigger_locs, data_field, times_before_trigger
+    )
+
     for j, track in enumerate(mcs_trigger_locs['tracks']):
         # Subsample the data fileld for analysis
         mcs_start_basetime = mcs_trigger_locs.sel(tracks=track)\
@@ -375,6 +378,8 @@ def _get_var_in_trigger_area_multiple(
             (data_field['time'] <= analysis_period_end_time), drop=True
             )
 
+        relative_time_to_trigger[j, :] = (mcs_start_basetime - \
+            var_before_trigger['time']).data
         for i, radius in enumerate(mcs_trigger_locs['radius']):
             trigger_area_idxs = _select_trigger_area_idxs(
                 mcs_trigger_locs, track, radius
@@ -382,7 +387,11 @@ def _get_var_in_trigger_area_multiple(
             var_in_trigger_area[j, :trigger_area_idxs.shape[0], i, :] = \
                 var_before_trigger.sel(cell=trigger_area_idxs).data.transpose()
     
-    return var_in_trigger_area
+    return xr.merge(
+        [var_in_trigger_area.rename('var'),
+         relative_time_to_trigger.rename('relative_time_to_trigger')
+         ]
+        )
 
 
 def _init_var_in_trigger_area(
@@ -463,6 +472,49 @@ def _init_var_in_trigger_area_multiple(
             ),
         dims=['tracks', 'cell', 'radius', 'time'],
         coords={'tracks': tracks, 'cell': cells, 'radius': radii, 'time': time},
+        )
+
+
+def _init_relative_time_to_trigger(
+        mcs_trigger_locs: xr.DataArray,
+        *vars
+        ) -> xr.DataArray:
+    """
+    Initialize a multi-dimensional xarray.DataArray that stores the variables in
+    the trigger area.
+
+    This function creates an xarray.DataArray with dimensions corresponding to 
+    tracks, cells, radii, and time steps before triggering. The array is filled 
+    with NaN values and is intended to store data for multiple variables in the 
+    trigger area of MCS (Mesoscale Convective Systems).
+
+    Parameters
+    ----------
+    mcs_trigger_locs : xr.DataArray
+        An xarray.DataArray containing the MCS trigger locations with dimensions 
+        'tracks', 'cell', and 'radius'.
+    *vars : tuple
+        A variable-length argument list of xarray.DataArray objects, which are 
+        used to determine the number of time steps before triggering.
+
+    Returns
+    -------
+    xr.DataArray
+        An xarray.DataArray initialized with NaN values, with dimensions 
+        ['tracks', 'cell', 'radius', 'time'] and corresponding coordinates.
+    """
+    tracks = mcs_trigger_locs['tracks']
+
+    # Get the number of time steps before triggering
+    i_time_before_trigger = _get_i_time_before_trigger(*vars)
+    time = np.arange(-i_time_before_trigger, 0, 1)
+
+    return xr.DataArray(
+        data=np.full(
+            (tracks.size, time.size), np.timedelta64('NaT'), dtype='timedelta64[ns]'
+            ),
+        dims=['tracks', 'time'],
+        coords={'tracks': tracks, 'time': time},
         )
 
 
